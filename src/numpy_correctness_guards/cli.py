@@ -14,11 +14,14 @@ from .guards.choice_shuffle import (
     safe_weighted_choice,
 )
 from .guards.einsum_newdtype import detect_einsum_newstyle_dtype_bug
+from .guards.poisson_variance import diagnose as diagnose_poisson_variance
+from .guards.poisson_variance import safe_poisson
 from .style import print_fields, resolve_style, status_headline
 
 GUARDS = {
     "choice-shuffle": "Generator.choice(replace=False, p=weights) shuffle probe/workaround",
     "einsum-newdtype": "np.einsum new-style dtype probe/workaround",
+    "poisson-variance": "Generator.poisson large-lambda variance probe/workaround",
 }
 
 
@@ -155,6 +158,53 @@ def cmd_einsum_newdtype_detect(args: argparse.Namespace) -> int:
     return 1 if result.affected else 0
 
 
+def cmd_poisson_variance_detect(args: argparse.Namespace) -> int:
+    result = diagnose_poisson_variance(
+        lam=args.lam,
+        n_samples=args.samples,
+        tolerance=args.tolerance,
+    )
+    if args.json:
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+        return 1 if result.affected else 0
+
+    style = resolve_style(args.no_color)
+    level = "fail" if result.affected else "ok"
+    print(status_headline(style, level, "numpy Poisson large-lambda variance probe"))
+    print_fields(
+        [
+            ("numpy version", result.numpy_version),
+            ("lam", f"{result.lam:.0e}"),
+            ("samples", str(result.n_samples)),
+            ("numpy var/lam", f"{result.numpy_var_over_lam:.4f}"),
+            ("safe_poisson var/lam", f"{result.safe_var_over_lam:.4f}"),
+            ("affected", "yes" if result.affected else "no"),
+            ("detail", result.detail),
+        ]
+    )
+    return 1 if result.affected else 0
+
+
+def cmd_poisson_variance_sample(args: argparse.Namespace) -> int:
+    rng = np.random.default_rng(args.seed) if args.seed is not None else None
+    samples = safe_poisson(args.lam, args.size, rng=rng)
+    if args.json:
+        print(json.dumps({"lam": args.lam, "size": args.size, "samples": samples.tolist()}))
+        return 0
+
+    style = resolve_style(args.no_color)
+    print(status_headline(style, "info", "safe_poisson sample summary"))
+    print_fields(
+        [
+            ("lam", f"{args.lam:.0e}"),
+            ("size", str(args.size)),
+            ("empirical mean", f"{samples.mean():.6e}"),
+            ("empirical var/lam", f"{samples.astype(float).var() / args.lam:.4f}"),
+        ]
+    )
+    return 0
+
+
 def _add_choice_shuffle_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     choice = sub.add_parser("choice-shuffle", help=GUARDS["choice-shuffle"])
     choice_sub = choice.add_subparsers(dest="choice_shuffle_command", required=True)
@@ -190,6 +240,27 @@ def _add_einsum_newdtype_commands(sub: argparse._SubParsersAction[argparse.Argum
     detect.set_defaults(func=cmd_einsum_newdtype_detect)
 
 
+def _add_poisson_variance_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    poisson = sub.add_parser("poisson-variance", help=GUARDS["poisson-variance"])
+    poisson_sub = poisson.add_subparsers(dest="poisson_variance_command", required=True)
+
+    detect = poisson_sub.add_parser("detect", help="empirically probe installed numpy for the bug")
+    detect.add_argument("--lam", type=float, default=1e16)
+    detect.add_argument("--samples", type=int, default=200_000)
+    detect.add_argument("--tolerance", type=float, default=0.05)
+    detect.add_argument("--json", action="store_true")
+    detect.add_argument("--no-color", action="store_true")
+    detect.set_defaults(func=cmd_poisson_variance_detect)
+
+    sample = poisson_sub.add_parser("sample", help="draw corrected Poisson(lam) samples via safe_poisson")
+    sample.add_argument("--lam", type=float, required=True)
+    sample.add_argument("--size", type=int, required=True)
+    sample.add_argument("--seed", type=int, default=None)
+    sample.add_argument("--json", action="store_true")
+    sample.add_argument("--no-color", action="store_true")
+    sample.set_defaults(func=cmd_poisson_variance_sample)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="numpy-guard",
@@ -206,6 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_sub = run.add_subparsers(dest="guard", required=True)
     _add_choice_shuffle_commands(run_sub)
     _add_einsum_newdtype_commands(run_sub)
+    _add_poisson_variance_commands(run_sub)
     return parser
 
 

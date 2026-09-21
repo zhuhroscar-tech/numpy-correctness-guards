@@ -8,6 +8,7 @@ This package replaces separate one-bug repositories with one shared CLI/API surf
 
 - `choice-shuffle` — detects and works around `numpy.random.Generator.choice(..., replace=False, p=weights, shuffle=True)` ignoring `shuffle` in the weighted-without-replacement path (`numpy/numpy#31210`). Migrated from `numpy-choice-shuffle-guard`.
 - `einsum-newdtype` — detects and works around `np.einsum` returning wrong results or crashing for new-style dtype operands (`numpy/numpy#32671`). Migrated from `numpy-einsum-newdtype-guard`.
+- `poisson-variance` — detects and works around `numpy.random.Generator.poisson(lam)` inflating variance for very large `lam` values (`numpy/numpy#31986`). Migrated from `numpy-poisson-variance-guard`.
 
 ## Install
 
@@ -36,6 +37,8 @@ Run the migrated choice/shuffle detector:
 numpy-guard run choice-shuffle detect --json
 numpy-guard run choice-shuffle verify --trials 500 --tolerance 0.08
 numpy-guard run einsum-newdtype detect --json
+numpy-guard run poisson-variance detect --lam 1e16 --samples 200000 --json
+numpy-guard run poisson-variance sample --lam 1e16 --size 1000 --seed 42
 ```
 
 The legacy executable name is intentionally not preserved here; use the shared `numpy-guard` entry point for all consolidated guards.
@@ -46,12 +49,14 @@ The legacy executable name is intentionally not preserved here; use the shared `
 import numpy as np
 from numpy_correctness_guards.guards.choice_shuffle import safe_weighted_choice
 from numpy_correctness_guards.guards.einsum_newdtype import safe_einsum
+from numpy_correctness_guards.guards.poisson_variance import safe_poisson
 
 rng = np.random.default_rng(0)
 weights = np.linspace(1.0, 2.0, 100)
 weights = weights / weights.sum()
 result = safe_weighted_choice(rng, 100, size=20, replace=False, p=weights)
 matrix = safe_einsum("ij,jk->ik", np.eye(2), np.eye(2))
+samples = safe_poisson(1e16, 1000, rng=rng)
 ```
 
 The `einsum-newdtype` live probe needs the optional `numpy_quaddtype` package, which can be installed with:
