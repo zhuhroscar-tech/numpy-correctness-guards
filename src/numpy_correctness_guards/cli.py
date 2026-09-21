@@ -16,12 +16,14 @@ from .guards.choice_shuffle import (
 from .guards.einsum_newdtype import detect_einsum_newstyle_dtype_bug
 from .guards.poisson_variance import diagnose as diagnose_poisson_variance
 from .guards.poisson_variance import safe_poisson
+from .guards.seedsequence_spawn import detect_spawn_race, verify_guard_eliminates_race
 from .style import print_fields, resolve_style, status_headline
 
 GUARDS = {
     "choice-shuffle": "Generator.choice(replace=False, p=weights) shuffle probe/workaround",
     "einsum-newdtype": "np.einsum new-style dtype probe/workaround",
     "poisson-variance": "Generator.poisson large-lambda variance probe/workaround",
+    "seedsequence-spawn": "SeedSequence.spawn thread-safety race probe/workaround",
 }
 
 
@@ -205,6 +207,57 @@ def cmd_poisson_variance_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seedsequence_spawn_detect(args: argparse.Namespace) -> int:
+    result = detect_spawn_race(
+        n_threads=args.threads,
+        spawns_per_thread=args.spawns_per_thread,
+        seed=args.seed,
+        switch_interval=args.switch_interval,
+    )
+    if args.json:
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+        return 1 if result.affected else 0
+
+    style = resolve_style(args.no_color)
+    level = "fail" if result.affected else "ok"
+    print(status_headline(style, level, "SeedSequence.spawn() thread-safety probe"))
+    print_fields(
+        [
+            ("numpy version", result.numpy_version),
+            ("affected", "yes" if result.affected else "no"),
+            ("duplicate children", f"{result.duplicate_count} / {result.total_children}"),
+            ("detail", result.detail),
+        ]
+    )
+    return 1 if result.affected else 0
+
+
+def cmd_seedsequence_spawn_verify(args: argparse.Namespace) -> int:
+    payload = verify_guard_eliminates_race(
+        n_threads=args.threads,
+        spawns_per_thread=args.spawns_per_thread,
+        seed=args.seed,
+        switch_interval=args.switch_interval,
+    )
+    passed = payload["guard_fully_eliminates_race"]
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if passed else 1
+
+    style = resolve_style(args.no_color)
+    level = "ok" if passed else "fail"
+    print(status_headline(style, level, "guard-eliminates-race verification"))
+    print_fields(
+        [
+            ("bare duplicates", f"{payload['bare_duplicates']} / {payload['bare_total']}"),
+            ("guarded duplicates", f"{payload['guarded_duplicates']} / {payload['guarded_total']}"),
+            ("guard fully eliminates race", "yes" if passed else "no"),
+        ]
+    )
+    return 0 if passed else 1
+
+
 def _add_choice_shuffle_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     choice = sub.add_parser("choice-shuffle", help=GUARDS["choice-shuffle"])
     choice_sub = choice.add_subparsers(dest="choice_shuffle_command", required=True)
@@ -261,6 +314,31 @@ def _add_poisson_variance_commands(sub: argparse._SubParsersAction[argparse.Argu
     sample.set_defaults(func=cmd_poisson_variance_sample)
 
 
+def _add_seedsequence_spawn_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    seedsequence = sub.add_parser("seedsequence-spawn", help=GUARDS["seedsequence-spawn"])
+    seedsequence_sub = seedsequence.add_subparsers(dest="seedsequence_spawn_command", required=True)
+
+    detect = seedsequence_sub.add_parser("detect", help="probe the installed numpy for the spawn race")
+    detect.add_argument("--threads", type=int, default=4)
+    detect.add_argument("--spawns-per-thread", type=int, default=500)
+    detect.add_argument("--seed", type=int, default=12345)
+    detect.add_argument("--switch-interval", type=float, default=1e-5)
+    detect.add_argument("--json", action="store_true")
+    detect.add_argument("--no-color", action="store_true")
+    detect.set_defaults(func=cmd_seedsequence_spawn_detect)
+
+    verify = seedsequence_sub.add_parser(
+        "verify", help="verify GuardedSeedSequence eliminates the race under stress"
+    )
+    verify.add_argument("--threads", type=int, default=4)
+    verify.add_argument("--spawns-per-thread", type=int, default=500)
+    verify.add_argument("--seed", type=int, default=12345)
+    verify.add_argument("--switch-interval", type=float, default=1e-5)
+    verify.add_argument("--json", action="store_true")
+    verify.add_argument("--no-color", action="store_true")
+    verify.set_defaults(func=cmd_seedsequence_spawn_verify)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="numpy-guard",
@@ -278,6 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_choice_shuffle_commands(run_sub)
     _add_einsum_newdtype_commands(run_sub)
     _add_poisson_variance_commands(run_sub)
+    _add_seedsequence_spawn_commands(run_sub)
     return parser
 
 

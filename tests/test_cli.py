@@ -16,6 +16,7 @@ def test_list_json_includes_migrated_guard(capsys):
     assert "choice-shuffle" in payload
     assert "einsum-newdtype" in payload
     assert "poisson-variance" in payload
+    assert "seedsequence-spawn" in payload
 
 
 def test_choice_shuffle_detect_json_exits_0_or_1_and_has_required_fields(capsys):
@@ -108,6 +109,33 @@ def test_poisson_variance_sample_json_outputs_requested_size(capsys):
     assert payload["lam"] == 1e16
     assert payload["size"] == 100
     assert len(payload["samples"]) == 100
+    assert rc == 0
+
+
+def test_seedsequence_spawn_detect_json_outputs_required_fields(capsys):
+    rc = main([
+        "run", "seedsequence-spawn", "detect", "--json",
+        "--threads", "2", "--spawns-per-thread", "50",
+    ])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert "affected" in payload
+    assert "duplicate_count" in payload
+    assert "total_children" in payload
+    assert payload["total_children"] == 100
+    assert rc in (0, 1)
+    assert rc == (1 if payload["affected"] else 0)
+
+
+def test_seedsequence_spawn_verify_json_reports_guard_pass(capsys):
+    rc = main([
+        "run", "seedsequence-spawn", "verify", "--json",
+        "--threads", "3", "--spawns-per-thread", "100",
+    ])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["guard_fully_eliminates_race"] is True
+    assert payload["guarded_duplicates"] == 0
     assert rc == 0
 
 
