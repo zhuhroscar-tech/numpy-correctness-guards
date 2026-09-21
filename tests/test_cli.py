@@ -17,6 +17,7 @@ def test_list_json_includes_migrated_guard(capsys):
     assert "einsum-newdtype" in payload
     assert "poisson-variance" in payload
     assert "seedsequence-spawn" in payload
+    assert "timedelta64-floordiv" in payload
 
 
 def test_choice_shuffle_detect_json_exits_0_or_1_and_has_required_fields(capsys):
@@ -136,6 +137,38 @@ def test_seedsequence_spawn_verify_json_reports_guard_pass(capsys):
     payload = json.loads(out)
     assert payload["guard_fully_eliminates_race"] is True
     assert payload["guarded_duplicates"] == 0
+    assert rc == 0
+
+
+def test_timedelta64_floordiv_detect_json_has_required_fields(capsys):
+    rc = main(["run", "timedelta64-floordiv", "detect", "--json"])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert "numpy_version" in payload
+    assert "affected" in payload
+    assert "mismatches" in payload
+    assert "total_checked" in payload
+    assert rc in (0, 1)
+    assert rc == (1 if payload["affected"] else 0)
+
+
+def test_timedelta64_floordiv_verify_json_passes(capsys):
+    rc = main(["run", "timedelta64-floordiv", "verify", "--json"])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["passed"] is True
+    assert payload["failures"] == 0
+    assert rc == 0
+
+
+def test_timedelta64_floordiv_apply_json_returns_correct_floor(capsys):
+    rc = main([
+        "run", "timedelta64-floordiv", "apply", "--json",
+        "--value", "-7", "--unit", "us", "--divisor", "2",
+    ])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["result"] == "-4 microseconds"
     assert rc == 0
 
 

@@ -17,6 +17,11 @@ from .guards.einsum_newdtype import detect_einsum_newstyle_dtype_bug
 from .guards.poisson_variance import diagnose as diagnose_poisson_variance
 from .guards.poisson_variance import safe_poisson
 from .guards.seedsequence_spawn import detect_spawn_race, verify_guard_eliminates_race
+from .guards.timedelta64_floordiv import (
+    detect_negative_floordiv_truncation_bug,
+    safe_timedelta64_floordiv,
+    verify_workaround_against_oracle,
+)
 from .style import print_fields, resolve_style, status_headline
 
 GUARDS = {
@@ -24,6 +29,7 @@ GUARDS = {
     "einsum-newdtype": "np.einsum new-style dtype probe/workaround",
     "poisson-variance": "Generator.poisson large-lambda variance probe/workaround",
     "seedsequence-spawn": "SeedSequence.spawn thread-safety race probe/workaround",
+    "timedelta64-floordiv": "timedelta64 // int negative floor-division probe/workaround",
 }
 
 
@@ -258,6 +264,77 @@ def cmd_seedsequence_spawn_verify(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
+def cmd_timedelta64_floordiv_detect(args: argparse.Namespace) -> int:
+    result = detect_negative_floordiv_truncation_bug()
+    if args.json:
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+        return 1 if result.affected else 0
+
+    style = resolve_style(args.no_color)
+    level = "fail" if result.affected else "ok"
+    print(status_headline(style, level, "numpy timedelta64 // int floor-division probe"))
+    print_fields(
+        [
+            ("numpy version", result.numpy_version),
+            ("affected", "yes" if result.affected else "no"),
+            ("mismatches", f"{result.mismatches}/{result.total_checked}"),
+            ("detail", result.detail),
+        ]
+    )
+    return 1 if result.affected else 0
+
+
+def cmd_timedelta64_floordiv_verify(args: argparse.Namespace) -> int:
+    payload = verify_workaround_against_oracle()
+    passed = payload["passed"]
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if passed else 1
+
+    style = resolve_style(args.no_color)
+    level = "ok" if passed else "fail"
+    print(status_headline(style, level, "safe_timedelta64_floordiv correctness check vs oracle"))
+    print_fields(
+        [
+            ("combinations checked", str(payload["checked"])),
+            ("failures", str(payload["failures"])),
+            ("passed", "yes" if passed else "no"),
+        ]
+    )
+    return 0 if passed else 1
+
+
+def cmd_timedelta64_floordiv_apply(args: argparse.Namespace) -> int:
+    delta = np.timedelta64(args.value, args.unit)
+    result = safe_timedelta64_floordiv(delta, args.divisor)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "value": args.value,
+                    "unit": args.unit,
+                    "divisor": args.divisor,
+                    "result": str(result),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    style = resolve_style(args.no_color)
+    print(status_headline(style, "ok", "safe timedelta64 floor-division"))
+    print_fields(
+        [
+            ("input", f"np.timedelta64({args.value}, {args.unit!r})"),
+            ("divisor", str(args.divisor)),
+            ("result", str(result)),
+        ]
+    )
+    return 0
+
+
 def _add_choice_shuffle_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     choice = sub.add_parser("choice-shuffle", help=GUARDS["choice-shuffle"])
     choice_sub = choice.add_subparsers(dest="choice_shuffle_command", required=True)
@@ -339,6 +416,31 @@ def _add_seedsequence_spawn_commands(sub: argparse._SubParsersAction[argparse.Ar
     verify.set_defaults(func=cmd_seedsequence_spawn_verify)
 
 
+def _add_timedelta64_floordiv_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    timedelta = sub.add_parser("timedelta64-floordiv", help=GUARDS["timedelta64-floordiv"])
+    timedelta_sub = timedelta.add_subparsers(dest="timedelta64_floordiv_command", required=True)
+
+    detect = timedelta_sub.add_parser("detect", help="probe installed numpy for the bug")
+    detect.add_argument("--json", action="store_true")
+    detect.add_argument("--no-color", action="store_true")
+    detect.set_defaults(func=cmd_timedelta64_floordiv_detect)
+
+    verify = timedelta_sub.add_parser(
+        "verify", help="verify safe_timedelta64_floordiv against the independent oracle"
+    )
+    verify.add_argument("--json", action="store_true")
+    verify.add_argument("--no-color", action="store_true")
+    verify.set_defaults(func=cmd_timedelta64_floordiv_verify)
+
+    apply = timedelta_sub.add_parser("apply", help="floor-divide one timedelta64 value safely")
+    apply.add_argument("--value", type=int, required=True)
+    apply.add_argument("--unit", default="us")
+    apply.add_argument("--divisor", type=int, required=True)
+    apply.add_argument("--json", action="store_true")
+    apply.add_argument("--no-color", action="store_true")
+    apply.set_defaults(func=cmd_timedelta64_floordiv_apply)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="numpy-guard",
@@ -357,6 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_einsum_newdtype_commands(run_sub)
     _add_poisson_variance_commands(run_sub)
     _add_seedsequence_spawn_commands(run_sub)
+    _add_timedelta64_floordiv_commands(run_sub)
     return parser
 
 
