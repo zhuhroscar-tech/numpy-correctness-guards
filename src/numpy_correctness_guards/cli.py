@@ -13,10 +13,12 @@ from .guards.choice_shuffle import (
     independent_reference_weighted_sample_without_replacement,
     safe_weighted_choice,
 )
+from .guards.einsum_newdtype import detect_einsum_newstyle_dtype_bug
 from .style import print_fields, resolve_style, status_headline
 
 GUARDS = {
     "choice-shuffle": "Generator.choice(replace=False, p=weights) shuffle probe/workaround",
+    "einsum-newdtype": "np.einsum new-style dtype probe/workaround",
 }
 
 
@@ -117,6 +119,42 @@ def cmd_choice_shuffle_verify(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
+def cmd_einsum_newdtype_detect(args: argparse.Namespace) -> int:
+    try:
+        result = detect_einsum_newstyle_dtype_bug()
+    except ImportError as exc:
+        payload = {
+            "error": (
+                "numpy_quaddtype is required for the live probe "
+                f"(pip install numpy_quaddtype): {exc}"
+            )
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            style = resolve_style(args.no_color)
+            print(status_headline(style, "warn", "cannot probe: numpy_quaddtype not installed"))
+            print_fields([("detail", payload["error"])])
+        return 2
+
+    if args.json:
+        print(json.dumps(result.__dict__, indent=2, sort_keys=True))
+        return 1 if result.affected else 0
+
+    style = resolve_style(args.no_color)
+    level = "fail" if result.affected else "ok"
+    print(status_headline(style, level, "numpy einsum new-style-dtype probe"))
+    print_fields(
+        [
+            ("numpy version", result.numpy_version),
+            ("probe dtype", result.dtype_name),
+            ("affected", "yes" if result.affected else "no"),
+            ("detail", result.detail),
+        ]
+    )
+    return 1 if result.affected else 0
+
+
 def _add_choice_shuffle_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     choice = sub.add_parser("choice-shuffle", help=GUARDS["choice-shuffle"])
     choice_sub = choice.add_subparsers(dest="choice_shuffle_command", required=True)
@@ -142,6 +180,16 @@ def _add_choice_shuffle_commands(sub: argparse._SubParsersAction[argparse.Argume
     verify.set_defaults(func=cmd_choice_shuffle_verify)
 
 
+def _add_einsum_newdtype_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    einsum = sub.add_parser("einsum-newdtype", help=GUARDS["einsum-newdtype"])
+    einsum_sub = einsum.add_subparsers(dest="einsum_newdtype_command", required=True)
+
+    detect = einsum_sub.add_parser("detect", help="probe the installed numpy for the bug")
+    detect.add_argument("--json", action="store_true")
+    detect.add_argument("--no-color", action="store_true")
+    detect.set_defaults(func=cmd_einsum_newdtype_detect)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="numpy-guard",
@@ -157,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run a guard by name")
     run_sub = run.add_subparsers(dest="guard", required=True)
     _add_choice_shuffle_commands(run_sub)
+    _add_einsum_newdtype_commands(run_sub)
     return parser
 
 

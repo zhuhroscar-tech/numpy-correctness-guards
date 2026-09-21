@@ -14,6 +14,7 @@ def test_list_json_includes_migrated_guard(capsys):
     payload = json.loads(out)
     assert rc == 0
     assert "choice-shuffle" in payload
+    assert "einsum-newdtype" in payload
 
 
 def test_choice_shuffle_detect_json_exits_0_or_1_and_has_required_fields(capsys):
@@ -42,6 +43,35 @@ def test_choice_shuffle_verify_json_reports_passed_field(capsys):
     assert "passed" in payload
     assert "max_abs_freq_diff" in payload
     assert rc == (0 if payload["passed"] else 1)
+
+
+def test_einsum_newdtype_detect_without_quaddtype_reports_clean_error(capsys, monkeypatch):
+    """Missing optional probe dependency should be a structured error, not a false clean bill."""
+    import numpy_correctness_guards.cli as cli_mod
+
+    def _raise_import_error():
+        raise ImportError("no module named numpy_quaddtype (simulated)")
+
+    monkeypatch.setattr(cli_mod, "detect_einsum_newstyle_dtype_bug", _raise_import_error)
+    rc = main(["run", "einsum-newdtype", "detect", "--json"])
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert "error" in payload
+    assert rc == 2
+
+
+def test_einsum_newdtype_detect_text_mode_prints_status_headline(capsys, monkeypatch):
+    import numpy_correctness_guards.cli as cli_mod
+
+    def _raise_import_error():
+        raise ImportError("no module named numpy_quaddtype (simulated)")
+
+    monkeypatch.setattr(cli_mod, "detect_einsum_newstyle_dtype_bug", _raise_import_error)
+    rc = main(["run", "einsum-newdtype", "detect", "--no-color"])
+    out = capsys.readouterr().out
+    assert "cannot probe: numpy_quaddtype not installed" in out
+    assert "numpy_quaddtype is required" in out
+    assert rc == 2
 
 
 def test_version_flag(capsys):
